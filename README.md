@@ -30,6 +30,7 @@ Proper FIX message formatting
 Session state management
 
 4. Order Lifecycle
+
 Client → NewOrderSingle → Server
 
 Server → ExecutionReport (New) → Client
