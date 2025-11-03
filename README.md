@@ -1,6 +1,8 @@
 Complete, fully functional end-to-end FIX Protocol application with both server and client components. Here's what makes it production-ready:
 
 🎯 Complete Features
+=====================
+
 1. FIX Server (Acceptor)
 
 Accepts incoming client connections on port 9878
@@ -33,6 +35,7 @@ Server → ExecutionReport (New) → Client
 Server → ExecutionReport (Filled) → Client
 
 🚀 How to Run
+===============
 
 Option 1: Server Only
 bash javac FIXProtocolApp.java
@@ -48,6 +51,7 @@ bash java FIXProtocolApp
 Select: 3
 
 📝 Usage Example
+==================
 
 Once running with option 3:
 
@@ -63,6 +67,8 @@ View order book
 
 
 🔧 Production Enhancements
+============================
+
 To make this truly production-ready, you'd want to add:
 
 Database persistence (PostgreSQL/MongoDB)
