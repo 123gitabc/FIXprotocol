@@ -33,6 +33,7 @@ Server → ExecutionReport (New) → Client
 Server → ExecutionReport (Filled) → Client
 
 🚀 How to Run
+
 Option 1: Server Only
 bash javac FIXProtocolApp.java
 java FIXProtocolApp
@@ -47,6 +48,7 @@ bash java FIXProtocolApp
 Select: 3
 
 📝 Usage Example
+
 Once running with option 3:
 
 Server starts and waits for connections
