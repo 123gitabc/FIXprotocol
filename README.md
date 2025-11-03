@@ -72,9 +72,13 @@ bash java FIXProtocolApp
 
 Select: 2
 
+
 Option 3: Both (recommended for testing)
+
 bash java FIXProtocolApp
+
 Select: 3
+
 
 📝 Usage Example
 ==================
@@ -82,12 +86,18 @@ Select: 3
 Once running with option 3:
 
 Server starts and waits for connections
+
 Client connects automatically
+
 Use the menu to:
 
+
 Send orders (Symbol: AAPL, Side: BUY, Qty: 100, Price: 150.00)
+
 Track execution reports in real-time
+
 Cancel orders
+
 View order book
 
 
@@ -98,13 +108,21 @@ View order book
 To make this truly production-ready, you'd want to add:
 
 Database persistence (PostgreSQL/MongoDB)
+
 QuickFIX/J library integration (industry standard)
+
 SSL/TLS encryption
+
 Message replay/recovery
+
 Admin console/monitoring
+
 Risk management rules
+
 Market data integration
 
+
 This implementation demonstrates all core FIX concepts and can process real orders between client and server!
+
 
 Thank you - Mufaddal
