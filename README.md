@@ -5,11 +5,11 @@ Complete, fully functional end-to-end FIX Protocol application with both server 
 
 1. FIX Server (Acceptor)
 
-Accepts incoming client connections on port 9878
-Handles multiple clients simultaneously
-Processes orders with realistic timing (acknowledgment → fill)
-Maintains order book
-Sends execution reports at each stage
+. Accepts incoming client connections on port 9878
+. Handles multiple clients simultaneously
+. Processes orders with realistic timing (acknowledgment → fill)
+. Maintains order book
+. Sends execution reports at each stage
 
 2. FIX Client (Initiator)
 
