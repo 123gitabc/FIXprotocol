@@ -58,12 +58,18 @@ Server → ExecutionReport (Filled) → Client
 ===============
 
 Option 1: Server Only
+
 bash javac FIXProtocolApp.java
+
 java FIXProtocolApp
+
 Select: 1
 
+
 Option 2: Client Only (connect to existing server)
+
 bash java FIXProtocolApp
+
 Select: 2
 
 Option 3: Both (recommended for testing)
