@@ -34,15 +34,17 @@ Server → ExecutionReport (Filled) → Client
 
 🚀 How to Run
 Option 1: Server Only
-bashjavac FIXProtocolApp.java
+bash javac FIXProtocolApp.java
 java FIXProtocolApp
-# Select: 1
+Select: 1
+
 Option 2: Client Only (connect to existing server)
-bashjava FIXProtocolApp
-# Select: 2
+bash java FIXProtocolApp
+Select: 2
+
 Option 3: Both (recommended for testing)
-bashjava FIXProtocolApp
-# Select: 3
+bash java FIXProtocolApp
+Select: 3
 
 📝 Usage Example
 Once running with option 3:
