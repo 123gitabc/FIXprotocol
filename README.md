@@ -6,28 +6,45 @@ Complete, fully functional end-to-end FIX Protocol application with both server 
 1. FIX Server (Acceptor)
 
 . Accepts incoming client connections on port 9878
+
 . Handles multiple clients simultaneously
+
 . Processes orders with realistic timing (acknowledgment → fill)
+
 . Maintains order book
+
 . Sends execution reports at each stage
+
 
 2. FIX Client (Initiator)
 
-Connects to FIX server
-Interactive command-line menu
-Send new orders
-Cancel orders
-View order status
-Track execution reports
+. Connects to FIX server
+
+. Interactive command-line menu
+
+. Send new orders
+
+. Cancel orders
+
+. View order status
+
+. Track execution reports
+
 
 3. Full FIX Protocol Implementation
 
-Logon/Logout sequences
-Heartbeat mechanism (30-second intervals)
-Sequence number tracking
-Checksum calculation
-Proper FIX message formatting
-Session state management
+. Logon/Logout sequences
+
+. Heartbeat mechanism (30-second intervals)
+
+. Sequence number tracking
+
+. Checksum calculation
+
+. Proper FIX message formatting
+
+. Session state management
+
 
 4. Order Lifecycle
 
