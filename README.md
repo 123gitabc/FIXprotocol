@@ -1,4 +1,5 @@
 Complete, fully functional end-to-end FIX Protocol application with both server and client components. Here's what makes it production-ready:
+
 🎯 Complete Features
 1. FIX Server (Acceptor)
 
@@ -30,6 +31,7 @@ Session state management
 Client → NewOrderSingle → Server
 Server → ExecutionReport (New) → Client
 Server → ExecutionReport (Filled) → Client
+
 🚀 How to Run
 Option 1: Server Only
 bashjavac FIXProtocolApp.java
@@ -41,6 +43,7 @@ bashjava FIXProtocolApp
 Option 3: Both (recommended for testing)
 bashjava FIXProtocolApp
 # Select: 3
+
 📝 Usage Example
 Once running with option 3:
 
