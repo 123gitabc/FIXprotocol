@@ -1,709 +1,861 @@
 // ============================================================================
-// COMPLETE FIX PROTOCOL APPLICATION - CLIENT & SERVER
+// PRODUCTION FIX PROTOCOL APPLICATION WITH QUICKFIX/J
 // ============================================================================
-// This is a production-ready FIX Protocol implementation with:
-// - FIX Server (Acceptor) - receives connections and processes orders
-// - FIX Client (Initiator) - connects to server and sends orders
-// - Message queue for order processing
-// - Persistent session state
-// - Complete FIX 4.4 protocol implementation
+// Maven Dependencies Required (pom.xml):
+// <dependencies>
+//     <dependency>
+//         <groupId>org.quickfixj</groupId>
+//         <artifactId>quickfixj-core</artifactId>
+//         <version>2.3.1</version>
+//     </dependency>
+//     <dependency>
+//         <groupId>org.quickfixj</groupId>
+//         <artifactId>quickfixj-messages-fix44</artifactId>
+//         <version>2.3.1</version>
+//     </dependency>
+//     <dependency>
+//         <groupId>org.slf4j</groupId>
+//         <artifactId>slf4j-simple</artifactId>
+//         <version>1.7.36</version>
+//     </dependency>
+// </dependencies>
 // ============================================================================
+
+import quickfix.*;
+import quickfix.field.*;
+import quickfix.fix44.*;
+import quickfix.fix44.Message;
 
 import java.io.*;
-import java.net.*;
-import java.text.SimpleDateFormat;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 
 // ============================================================================
-// MAIN APPLICATION - Run both server and client
+// MAIN APPLICATION
 // ============================================================================
 public class FIXProtocolApp {
     public static void main(String[] args) {
-        Scanner scanner = new Scanner(System.in);
+        System.out.println("╔════════════════════════════════════════════╗");
+        System.out.println("║  FIX Protocol Trading System (QuickFIX/J) ║");
+        System.out.println("╚════════════════════════════════════════════╝\n");
         
-        System.out.println("=== FIX Protocol Trading System ===");
+        Scanner scanner = new Scanner(System.in);
         System.out.println("1. Start FIX Server (Acceptor)");
         System.out.println("2. Start FIX Client (Initiator)");
-        System.out.println("3. Run Both (Server + Client)");
+        System.out.println("3. Run Both (Recommended for testing)");
         System.out.print("\nSelect mode: ");
         
         int choice = scanner.nextInt();
+        scanner.nextLine();
         
-        switch (choice) {
-            case 1:
-                startServer();
-                break;
-            case 2:
-                startClient();
-                break;
-            case 3:
-                startBoth();
-                break;
-            default:
-                System.out.println("Invalid choice");
+        try {
+            switch (choice) {
+                case 1:
+                    startServer();
+                    break;
+                case 2:
+                    startClient(scanner);
+                    break;
+                case 3:
+                    startBoth(scanner);
+                    break;
+                default:
+                    System.out.println("Invalid choice");
+            }
+        } catch (Exception e) {
+            System.err.println("Error: " + e.getMessage());
+            e.printStackTrace();
         }
     }
     
-    private static void startServer() {
-        System.out.println("\n=== Starting FIX Server ===");
-        FIXServer server = new FIXServer(9878);
-        server.start();
-    }
-    
-    private static void startClient() {
-        System.out.println("\n=== Starting FIX Client ===");
-        FIXConfig config = new FIXConfig(
-            "CLIENT_TRADER",
-            "SERVER_EXCHANGE",
-            "localhost",
-            9878,
-            "FIX.4.4"
+    private static void startServer() throws Exception {
+        System.out.println("\n=== Starting FIX Server (Acceptor) ===\n");
+        
+        // Create server configuration file
+        createServerConfig();
+        
+        SessionSettings settings = new SessionSettings("server.cfg");
+        FIXServerApplication serverApp = new FIXServerApplication();
+        MessageStoreFactory storeFactory = new FileStoreFactory(settings);
+        LogFactory logFactory = new FileLogFactory(settings);
+        MessageFactory messageFactory = new DefaultMessageFactory();
+        
+        SocketAcceptor acceptor = new SocketAcceptor(
+            serverApp, storeFactory, settings, logFactory, messageFactory
         );
         
-        FIXClient client = new FIXClient(config);
-        client.start();
+        acceptor.start();
+        System.out.println("✓ FIX Server started and listening...");
+        System.out.println("Press Enter to stop server...");
+        System.in.read();
         
-        // Interactive menu for client
-        Scanner scanner = new Scanner(System.in);
-        while (client.isConnected()) {
-            System.out.println("\n=== Client Menu ===");
-            System.out.println("1. Send New Order");
-            System.out.println("2. Cancel Order");
-            System.out.println("3. View Orders");
-            System.out.println("4. Disconnect");
-            System.out.print("Choice: ");
+        acceptor.stop();
+        System.out.println("✓ Server stopped");
+    }
+    
+    private static void startClient(Scanner scanner) throws Exception {
+        System.out.println("\n=== Starting FIX Client (Initiator) ===\n");
+        
+        // Create client configuration file
+        createClientConfig();
+        
+        SessionSettings settings = new SessionSettings("client.cfg");
+        FIXClientApplication clientApp = new FIXClientApplication();
+        MessageStoreFactory storeFactory = new FileStoreFactory(settings);
+        LogFactory logFactory = new FileLogFactory(settings);
+        MessageFactory messageFactory = new DefaultMessageFactory();
+        
+        SocketInitiator initiator = new SocketInitiator(
+            clientApp, storeFactory, settings, logFactory, messageFactory
+        );
+        
+        initiator.start();
+        System.out.println("✓ FIX Client started");
+        System.out.println("Waiting for connection...\n");
+        
+        // Wait for logon
+        clientApp.waitForLogon();
+        
+        // Interactive menu
+        runClientMenu(scanner, clientApp);
+        
+        initiator.stop();
+        System.out.println("✓ Client stopped");
+    }
+    
+    private static void startBoth(Scanner scanner) throws Exception {
+        // Start server in background thread
+        Thread serverThread = new Thread(() -> {
+            try {
+                createServerConfig();
+                SessionSettings settings = new SessionSettings("server.cfg");
+                FIXServerApplication serverApp = new FIXServerApplication();
+                MessageStoreFactory storeFactory = new FileStoreFactory(settings);
+                LogFactory logFactory = new FileLogFactory(settings);
+                MessageFactory messageFactory = new DefaultMessageFactory();
+                
+                SocketAcceptor acceptor = new SocketAcceptor(
+                    serverApp, storeFactory, settings, logFactory, messageFactory
+                );
+                
+                acceptor.start();
+                System.out.println("✓ Server started on port 9878\n");
+                
+                // Keep server running
+                synchronized (acceptor) {
+                    acceptor.wait();
+                }
+            } catch (Exception e) {
+                System.err.println("Server error: " + e.getMessage());
+            }
+        });
+        serverThread.setDaemon(true);
+        serverThread.start();
+        
+        // Wait for server to start
+        Thread.sleep(2000);
+        
+        // Start client
+        startClient(scanner);
+    }
+    
+    private static void runClientMenu(Scanner scanner, FIXClientApplication clientApp) {
+        while (true) {
+            System.out.println("\n╔════════════════════════════════╗");
+            System.out.println("║         Client Menu            ║");
+            System.out.println("╠════════════════════════════════╣");
+            System.out.println("║ 1. Send New Order              ║");
+            System.out.println("║ 2. Cancel Order                ║");
+            System.out.println("║ 3. Replace Order               ║");
+            System.out.println("║ 4. Request Order Status        ║");
+            System.out.println("║ 5. View Active Orders          ║");
+            System.out.println("║ 6. View Order History          ║");
+            System.out.println("║ 7. Disconnect                  ║");
+            System.out.println("╚════════════════════════════════╝");
+            System.out.print("\nChoice: ");
             
             int choice = scanner.nextInt();
-            scanner.nextLine(); // consume newline
+            scanner.nextLine();
             
-            switch (choice) {
-                case 1:
-                    System.out.print("Symbol: ");
-                    String symbol = scanner.nextLine().toUpperCase();
-                    System.out.print("Side (BUY/SELL): ");
-                    String side = scanner.nextLine().toUpperCase();
-                    System.out.print("Quantity: ");
-                    int qty = scanner.nextInt();
-                    System.out.print("Price: ");
-                    double price = scanner.nextDouble();
-                    scanner.nextLine();
-                    
-                    String orderId = "ORD" + System.currentTimeMillis();
-                    client.sendNewOrderSingle(orderId, symbol, side, qty, price);
-                    break;
-                case 2:
-                    System.out.print("Order ID to cancel: ");
-                    String cancelId = scanner.nextLine();
-                    client.sendOrderCancelRequest(cancelId);
-                    break;
-                case 3:
-                    client.displayOrders();
-                    break;
-                case 4:
-                    client.stop();
-                    return;
+            try {
+                switch (choice) {
+                    case 1:
+                        sendNewOrder(scanner, clientApp);
+                        break;
+                    case 2:
+                        cancelOrder(scanner, clientApp);
+                        break;
+                    case 3:
+                        replaceOrder(scanner, clientApp);
+                        break;
+                    case 4:
+                        requestOrderStatus(scanner, clientApp);
+                        break;
+                    case 5:
+                        clientApp.displayActiveOrders();
+                        break;
+                    case 6:
+                        clientApp.displayOrderHistory();
+                        break;
+                    case 7:
+                        return;
+                    default:
+                        System.out.println("Invalid choice");
+                }
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
             }
         }
     }
     
-    private static void startBoth() {
-        // Start server in background thread
-        new Thread(() -> startServer()).start();
+    private static void sendNewOrder(Scanner scanner, FIXClientApplication clientApp) {
+        System.out.println("\n--- New Order Entry ---");
+        System.out.print("Symbol (e.g., AAPL): ");
+        String symbol = scanner.nextLine().toUpperCase();
         
-        // Wait for server to initialize
-        try {
-            Thread.sleep(2000);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
+        System.out.print("Side (1=Buy, 2=Sell): ");
+        char side = scanner.nextLine().charAt(0);
+        
+        System.out.print("Quantity: ");
+        int quantity = scanner.nextInt();
+        
+        System.out.print("Order Type (1=Market, 2=Limit): ");
+        char ordType = scanner.next().charAt(0);
+        
+        double price = 0;
+        if (ordType == '2') {
+            System.out.print("Limit Price: ");
+            price = scanner.nextDouble();
         }
+        scanner.nextLine();
         
-        // Start client in main thread
-        startClient();
+        System.out.print("Time in Force (0=Day, 1=GTC, 3=IOC, 4=FOK): ");
+        char tif = scanner.nextLine().charAt(0);
+        
+        clientApp.sendNewOrderSingle(symbol, side, quantity, ordType, price, tif);
+    }
+    
+    private static void cancelOrder(Scanner scanner, FIXClientApplication clientApp) {
+        System.out.print("\nEnter ClOrdID to cancel: ");
+        String clOrdID = scanner.nextLine();
+        clientApp.sendOrderCancelRequest(clOrdID);
+    }
+    
+    private static void replaceOrder(Scanner scanner, FIXClientApplication clientApp) {
+        System.out.print("\nEnter ClOrdID to replace: ");
+        String origClOrdID = scanner.nextLine();
+        
+        System.out.print("New Quantity: ");
+        int newQty = scanner.nextInt();
+        
+        System.out.print("New Price: ");
+        double newPrice = scanner.nextDouble();
+        scanner.nextLine();
+        
+        clientApp.sendOrderCancelReplaceRequest(origClOrdID, newQty, newPrice);
+    }
+    
+    private static void requestOrderStatus(Scanner scanner, FIXClientApplication clientApp) {
+        System.out.print("\nEnter ClOrdID: ");
+        String clOrdID = scanner.nextLine();
+        clientApp.sendOrderStatusRequest(clOrdID);
+    }
+    
+    // Configuration file creators
+    private static void createServerConfig() throws IOException {
+        String config = "[DEFAULT]\n" +
+            "FileStorePath=data/server\n" +
+            "FileLogPath=logs/server\n" +
+            "ConnectionType=acceptor\n" +
+            "StartTime=00:00:00\n" +
+            "EndTime=23:59:59\n" +
+            "HeartBtInt=30\n" +
+            "ValidOrderTypes=1,2,3,4\n" +
+            "SenderCompID=SERVER_EXCHANGE\n" +
+            "TargetCompID=CLIENT_TRADER\n" +
+            "ResetOnLogon=Y\n" +
+            "ResetOnLogout=Y\n" +
+            "ResetOnDisconnect=Y\n" +
+            "\n" +
+            "[SESSION]\n" +
+            "BeginString=FIX.4.4\n" +
+            "SocketAcceptPort=9878\n";
+        
+        writeConfigFile("server.cfg", config);
+    }
+    
+    private static void createClientConfig() throws IOException {
+        String config = "[DEFAULT]\n" +
+            "FileStorePath=data/client\n" +
+            "FileLogPath=logs/client\n" +
+            "ConnectionType=initiator\n" +
+            "StartTime=00:00:00\n" +
+            "EndTime=23:59:59\n" +
+            "HeartBtInt=30\n" +
+            "ReconnectInterval=5\n" +
+            "SenderCompID=CLIENT_TRADER\n" +
+            "TargetCompID=SERVER_EXCHANGE\n" +
+            "ResetOnLogon=Y\n" +
+            "ResetOnLogout=Y\n" +
+            "ResetOnDisconnect=Y\n" +
+            "\n" +
+            "[SESSION]\n" +
+            "BeginString=FIX.4.4\n" +
+            "SocketConnectHost=localhost\n" +
+            "SocketConnectPort=9878\n";
+        
+        writeConfigFile("client.cfg", config);
+    }
+    
+    private static void writeConfigFile(String filename, String content) throws IOException {
+        try (PrintWriter writer = new PrintWriter(new FileWriter(filename))) {
+            writer.print(content);
+        }
+        System.out.println("✓ Configuration file created: " + filename);
     }
 }
 
 // ============================================================================
-// FIX SERVER (ACCEPTOR) - Receives connections and processes orders
+// FIX SERVER APPLICATION
 // ============================================================================
-class FIXServer {
-    private final int port;
-    private ServerSocket serverSocket;
-    private final ExecutorService clientHandlers;
-    private final Map<String, Order> orderBook;
-    private boolean running;
+class FIXServerApplication extends MessageCracker implements Application {
+    private final Map<String, OrderData> orderBook = new ConcurrentHashMap<>();
+    private final Map<SessionID, Boolean> sessions = new ConcurrentHashMap<>();
     
-    public FIXServer(int port) {
-        this.port = port;
-        this.clientHandlers = Executors.newCachedThreadPool();
-        this.orderBook = new ConcurrentHashMap<>();
-        this.running = false;
+    @Override
+    public void onCreate(SessionID sessionId) {
+        System.out.println("Server: Session created - " + sessionId);
     }
     
-    public void start() {
-        try {
-            serverSocket = new ServerSocket(port);
-            running = true;
-            System.out.println("✓ FIX Server started on port " + port);
-            System.out.println("Waiting for client connections...\n");
-            
-            while (running) {
-                Socket clientSocket = serverSocket.accept();
-                System.out.println("✓ Client connected from: " + clientSocket.getInetAddress());
-                
-                FIXServerSession session = new FIXServerSession(clientSocket, this);
-                clientHandlers.submit(session);
-            }
-        } catch (IOException e) {
-            if (running) {
-                System.err.println("Server error: " + e.getMessage());
-            }
+    @Override
+    public void onLogon(SessionID sessionId) {
+        System.out.println("✓ Server: Client logged on - " + sessionId);
+        sessions.put(sessionId, true);
+    }
+    
+    @Override
+    public void onLogout(SessionID sessionId) {
+        System.out.println("✓ Server: Client logged out - " + sessionId);
+        sessions.remove(sessionId);
+    }
+    
+    @Override
+    public void toAdmin(Message message, SessionID sessionId) {
+        // Handle admin messages
+    }
+    
+    @Override
+    public void fromAdmin(Message message, SessionID sessionId) {
+        // Handle admin messages from client
+    }
+    
+    @Override
+    public void toApp(Message message, SessionID sessionId) {
+        System.out.println(">> Server sending: " + message.getHeader().getString(MsgType.FIELD));
+    }
+    
+    @Override
+    public void fromApp(Message message, SessionID sessionId) 
+            throws FieldNotFound, IncorrectDataFormat, IncorrectTagValue, UnsupportedMessageType {
+        System.out.println("<< Server received: " + message.getHeader().getString(MsgType.FIELD));
+        crack(message, sessionId);
+    }
+    
+    // Handle New Order Single
+    public void onMessage(NewOrderSingle order, SessionID sessionId) 
+            throws FieldNotFound, UnsupportedMessageType, IncorrectTagValue {
+        
+        String clOrdID = order.getClOrdID().getValue();
+        Symbol symbol = order.getSymbol();
+        Side side = order.getSide();
+        OrderQty orderQty = order.getOrderQty();
+        OrdType ordType = order.getOrdType();
+        
+        Price price = new Price(0);
+        if (order.isSetPrice()) {
+            price = order.getPrice();
+        }
+        
+        System.out.println("\n📋 NEW ORDER RECEIVED:");
+        System.out.println("   ClOrdID: " + clOrdID);
+        System.out.println("   Symbol: " + symbol.getValue());
+        System.out.println("   Side: " + (side.getValue() == Side.BUY ? "BUY" : "SELL"));
+        System.out.println("   Quantity: " + orderQty.getValue());
+        System.out.println("   Type: " + getOrderTypeDesc(ordType.getValue()));
+        if (ordType.getValue() == OrdType.LIMIT) {
+            System.out.println("   Price: $" + price.getValue());
+        }
+        
+        // Generate order ID
+        String orderID = "ORD" + System.currentTimeMillis();
+        
+        // Store order
+        OrderData orderData = new OrderData(orderID, clOrdID, symbol.getValue(), 
+            side.getValue(), (int)orderQty.getValue(), price.getValue());
+        orderBook.put(clOrdID, orderData);
+        
+        // Send acknowledgment (NEW)
+        sendExecutionReport(sessionId, orderData, ExecType.NEW, OrdStatus.NEW, 0, 0);
+        
+        // Simulate order processing
+        processOrder(sessionId, orderData, ordType.getValue());
+    }
+    
+    // Handle Order Cancel Request
+    public void onMessage(OrderCancelRequest cancelRequest, SessionID sessionId) 
+            throws FieldNotFound {
+        
+        String origClOrdID = cancelRequest.getOrigClOrdID().getValue();
+        String clOrdID = cancelRequest.getClOrdID().getValue();
+        
+        System.out.println("\n🚫 CANCEL REQUEST:");
+        System.out.println("   Original ClOrdID: " + origClOrdID);
+        
+        OrderData order = orderBook.get(origClOrdID);
+        if (order != null && !order.isFilled()) {
+            order.setCanceled(true);
+            sendExecutionReport(sessionId, order, ExecType.CANCELED, OrdStatus.CANCELED, 0, 0);
+            System.out.println("   ✓ Order canceled");
+        } else {
+            sendCancelReject(sessionId, clOrdID, origClOrdID, "Order not found or already filled");
+            System.out.println("   ✗ Cancel rejected");
         }
     }
     
-    public void processOrder(Order order) {
-        orderBook.put(order.getOrderId(), order);
-        System.out.println("📋 Order received: " + order);
+    // Handle Order Cancel/Replace Request
+    public void onMessage(OrderCancelReplaceRequest replaceRequest, SessionID sessionId) 
+            throws FieldNotFound {
         
-        // Simulate order processing
+        String origClOrdID = replaceRequest.getOrigClOrdID().getValue();
+        String clOrdID = replaceRequest.getClOrdID().getValue();
+        
+        System.out.println("\n🔄 REPLACE REQUEST:");
+        System.out.println("   Original ClOrdID: " + origClOrdID);
+        
+        OrderData order = orderBook.get(origClOrdID);
+        if (order != null && !order.isFilled()) {
+            // Update order
+            if (replaceRequest.isSetOrderQty()) {
+                order.setQuantity((int)replaceRequest.getOrderQty().getValue());
+            }
+            if (replaceRequest.isSetPrice()) {
+                order.setPrice(replaceRequest.getPrice().getValue());
+            }
+            
+            orderBook.remove(origClOrdID);
+            orderBook.put(clOrdID, order);
+            order.setClOrdID(clOrdID);
+            
+            sendExecutionReport(sessionId, order, ExecType.REPLACED, OrdStatus.NEW, 0, 0);
+            System.out.println("   ✓ Order replaced");
+        } else {
+            sendCancelReject(sessionId, clOrdID, origClOrdID, "Order not found or already filled");
+            System.out.println("   ✗ Replace rejected");
+        }
+    }
+    
+    // Handle Order Status Request
+    public void onMessage(OrderStatusRequest statusRequest, SessionID sessionId) 
+            throws FieldNotFound {
+        
+        String clOrdID = statusRequest.getClOrdID().getValue();
+        
+        System.out.println("\n❓ STATUS REQUEST:");
+        System.out.println("   ClOrdID: " + clOrdID);
+        
+        OrderData order = orderBook.get(clOrdID);
+        if (order != null) {
+            char execType = order.isFilled() ? ExecType.ORDER_STATUS : ExecType.ORDER_STATUS;
+            char ordStatus = order.isFilled() ? OrdStatus.FILLED : 
+                           order.isCanceled() ? OrdStatus.CANCELED : OrdStatus.NEW;
+            
+            sendExecutionReport(sessionId, order, execType, ordStatus, 
+                order.getFilledQty(), order.getPrice());
+        }
+    }
+    
+    private void processOrder(SessionID sessionId, OrderData order, char ordType) {
         new Thread(() -> {
             try {
-                Thread.sleep(1000);
-                order.setStatus(OrderStatus.NEW);
-                System.out.println("✓ Order acknowledged: " + order.getOrderId());
+                // Simulate market/limit order processing
+                if (ordType == OrdType.MARKET) {
+                    Thread.sleep(500);
+                } else {
+                    Thread.sleep(2000);
+                }
                 
-                Thread.sleep(2000);
-                order.setStatus(OrderStatus.FILLED);
-                order.setFilledQty(order.getQuantity());
-                System.out.println("✓ Order filled: " + order.getOrderId());
+                if (!order.isCanceled()) {
+                    // Partial fill (50%)
+                    int partialQty = order.getQuantity() / 2;
+                    if (partialQty > 0) {
+                        order.setFilledQty(partialQty);
+                        sendExecutionReport(sessionId, order, ExecType.PARTIAL_FILL, 
+                            OrdStatus.PARTIALLY_FILLED, partialQty, order.getPrice());
+                        System.out.println("   📊 Partial fill: " + partialQty + " shares");
+                        
+                        Thread.sleep(1500);
+                    }
+                    
+                    // Full fill
+                    if (!order.isCanceled()) {
+                        int remainingQty = order.getQuantity() - order.getFilledQty();
+                        order.setFilledQty(order.getQuantity());
+                        sendExecutionReport(sessionId, order, ExecType.FILL, 
+                            OrdStatus.FILLED, remainingQty, order.getPrice());
+                        System.out.println("   ✅ Order fully filled");
+                    }
+                }
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
         }).start();
     }
     
-    public Order getOrder(String orderId) {
-        return orderBook.get(orderId);
+    private void sendExecutionReport(SessionID sessionId, OrderData order, 
+            char execType, char ordStatus, int lastQty, double lastPx) {
+        try {
+            ExecutionReport execReport = new ExecutionReport(
+                new OrderID(order.getOrderID()),
+                new ExecID("EXEC" + System.currentTimeMillis()),
+                new ExecType(execType),
+                new OrdStatus(ordStatus),
+                new Side(order.getSide()),
+                new LeavesQty(order.getQuantity() - order.getFilledQty()),
+                new CumQty(order.getFilledQty()),
+                new AvgPx(order.getPrice())
+            );
+            
+            execReport.set(new ClOrdID(order.getClOrdID()));
+            execReport.set(new Symbol(order.getSymbol()));
+            execReport.set(new OrderQty(order.getQuantity()));
+            execReport.set(new Price(order.getPrice()));
+            
+            if (lastQty > 0) {
+                execReport.set(new LastQty(lastQty));
+                execReport.set(new LastPx(lastPx));
+            }
+            
+            execReport.set(new TransactTime(new Date()));
+            
+            Session.sendToTarget(execReport, sessionId);
+        } catch (Exception e) {
+            System.err.println("Error sending execution report: " + e.getMessage());
+        }
     }
     
-    public void stop() {
-        running = false;
+    private void sendCancelReject(SessionID sessionId, String clOrdID, 
+            String origClOrdID, String reason) {
         try {
-            if (serverSocket != null) {
-                serverSocket.close();
-            }
-            clientHandlers.shutdown();
-        } catch (IOException e) {
-            e.printStackTrace();
+            OrderCancelReject reject = new OrderCancelReject(
+                new OrderID("UNKNOWN"),
+                new ClOrdID(clOrdID),
+                new OrigClOrdID(origClOrdID),
+                new OrdStatus(OrdStatus.REJECTED),
+                new CxlRejResponseTo(CxlRejResponseTo.ORDER_CANCEL_REQUEST)
+            );
+            
+            reject.set(new Text(reason));
+            Session.sendToTarget(reject, sessionId);
+        } catch (Exception e) {
+            System.err.println("Error sending cancel reject: " + e.getMessage());
+        }
+    }
+    
+    private String getOrderTypeDesc(char ordType) {
+        switch (ordType) {
+            case OrdType.MARKET: return "Market";
+            case OrdType.LIMIT: return "Limit";
+            case OrdType.STOP: return "Stop";
+            case OrdType.STOP_LIMIT: return "Stop Limit";
+            default: return "Unknown";
         }
     }
 }
 
 // ============================================================================
-// FIX SERVER SESSION - Handles individual client connections
+// FIX CLIENT APPLICATION
 // ============================================================================
-class FIXServerSession implements Runnable {
-    private final Socket socket;
-    private final FIXServer server;
-    private PrintWriter out;
-    private BufferedReader in;
-    private int outgoingSeqNum = 1;
-    private int incomingSeqNum = 1;
-    private boolean loggedOn = false;
-    private String senderCompID;
-    private String targetCompID;
-    private ScheduledExecutorService heartbeatExecutor;
+class FIXClientApplication extends MessageCracker implements Application {
+    private SessionID sessionId;
+    private final CountDownLatch logonLatch = new CountDownLatch(1);
+    private final Map<String, ClientOrder> orders = new ConcurrentHashMap<>();
+    private final List<String> orderHistory = new ArrayList<>();
     
-    public FIXServerSession(Socket socket, FIXServer server) {
-        this.socket = socket;
-        this.server = server;
-        this.heartbeatExecutor = Executors.newScheduledThreadPool(1);
+    @Override
+    public void onCreate(SessionID sessionId) {
+        this.sessionId = sessionId;
+        System.out.println("Client: Session created");
     }
     
     @Override
-    public void run() {
+    public void onLogon(SessionID sessionId) {
+        System.out.println("✓ Client: Logged on to server\n");
+        this.sessionId = sessionId;
+        logonLatch.countDown();
+    }
+    
+    @Override
+    public void onLogout(SessionID sessionId) {
+        System.out.println("✓ Client: Logged out from server");
+    }
+    
+    @Override
+    public void toAdmin(Message message, SessionID sessionId) {
+        // Handle admin messages
+    }
+    
+    @Override
+    public void fromAdmin(Message message, SessionID sessionId) {
+        // Handle admin messages from server
+    }
+    
+    @Override
+    public void toApp(Message message, SessionID sessionId) {
         try {
-            out = new PrintWriter(socket.getOutputStream(), true);
-            in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            
-            String message;
-            while ((message = readFIXMessage()) != null) {
-                processMessage(message);
-            }
-        } catch (IOException e) {
-            System.err.println("Session error: " + e.getMessage());
-        } finally {
-            cleanup();
-        }
-    }
-    
-    private String readFIXMessage() throws IOException {
-        StringBuilder message = new StringBuilder();
-        int c;
-        
-        while ((c = in.read()) != -1) {
-            message.append((char) c);
-            if (message.toString().contains("10=") && message.toString().endsWith("\u0001")) {
-                return message.toString();
-            }
-        }
-        
-        return null;
-    }
-    
-    private void processMessage(String rawMessage) {
-        System.out.println(">> Server received: " + formatMessage(rawMessage));
-        
-        FIXMessage message = FIXMessage.parse(rawMessage);
-        String msgType = message.getField(35);
-        
-        if (msgType == null) return;
-        
-        // Store sender/target for responses
-        if (senderCompID == null) {
-            senderCompID = message.getField(56); // Our ID is their target
-            targetCompID = message.getField(49); // Their ID
-        }
-        
-        switch (msgType) {
-            case "A": // Logon
-                handleLogon(message);
-                break;
-            case "0": // Heartbeat
-                System.out.println("♥ Heartbeat received from client");
-                break;
-            case "1": // Test Request
-                sendHeartbeat(message.getField(112));
-                break;
-            case "D": // New Order Single
-                handleNewOrder(message);
-                break;
-            case "F": // Order Cancel Request
-                handleCancelRequest(message);
-                break;
-            case "5": // Logout
-                handleLogout();
-                break;
-        }
-        
-        incomingSeqNum++;
-    }
-    
-    private void handleLogon(FIXMessage logon) {
-        loggedOn = true;
-        System.out.println("✓ Client logged on");
-        
-        // Send Logon response
-        FIXMessage response = new FIXMessage("A");
-        response.setField(98, "0"); // EncryptMethod
-        response.setField(108, "30"); // HeartBtInt
-        sendMessage(response);
-        
-        // Start heartbeat
-        heartbeatExecutor.scheduleAtFixedRate(() -> {
-            if (loggedOn) {
-                sendHeartbeat(null);
-            }
-        }, 30, 30, TimeUnit.SECONDS);
-    }
-    
-    private void handleNewOrder(FIXMessage orderMsg) {
-        String clOrdId = orderMsg.getField(11);
-        String symbol = orderMsg.getField(55);
-        String side = orderMsg.getField(54);
-        int quantity = Integer.parseInt(orderMsg.getField(38));
-        double price = Double.parseDouble(orderMsg.getField(44));
-        
-        String orderId = "EXE" + System.currentTimeMillis();
-        
-        Order order = new Order(orderId, clOrdId, symbol, 
-            side.equals("1") ? "BUY" : "SELL", quantity, price);
-        
-        // Send immediate acknowledgment
-        sendExecutionReport(order, "0", "0"); // New order
-        
-        // Process order
-        server.processOrder(order);
-        
-        // Monitor order status and send updates
-        new Thread(() -> {
-            OrderStatus lastStatus = OrderStatus.PENDING;
-            while (order.getStatus() != OrderStatus.FILLED && 
-                   order.getStatus() != OrderStatus.REJECTED) {
-                try {
-                    Thread.sleep(500);
-                    if (order.getStatus() != lastStatus) {
-                        sendExecutionReport(order, 
-                            getExecType(order.getStatus()), 
-                            getOrdStatus(order.getStatus()));
-                        lastStatus = order.getStatus();
-                    }
-                } catch (InterruptedException e) {
-                    break;
-                }
-            }
-            
-            // Send final fill report
-            if (order.getStatus() == OrderStatus.FILLED) {
-                sendExecutionReport(order, "2", "2"); // Fill
-            }
-        }).start();
-    }
-    
-    private void handleCancelRequest(FIXMessage cancelMsg) {
-        String orderId = cancelMsg.getField(37);
-        Order order = server.getOrder(orderId);
-        
-        if (order != null && order.getStatus() != OrderStatus.FILLED) {
-            order.setStatus(OrderStatus.CANCELED);
-            sendExecutionReport(order, "4", "4"); // Canceled
-            System.out.println("✓ Order canceled: " + orderId);
-        }
-    }
-    
-    private void sendExecutionReport(Order order, String execType, String ordStatus) {
-        FIXMessage execReport = new FIXMessage("8");
-        execReport.setField(37, order.getOrderId()); // OrderID
-        execReport.setField(11, order.getClOrdId()); // ClOrdID
-        execReport.setField(150, execType); // ExecType
-        execReport.setField(39, ordStatus); // OrdStatus
-        execReport.setField(55, order.getSymbol()); // Symbol
-        execReport.setField(54, order.getSide().equals("BUY") ? "1" : "2"); // Side
-        execReport.setField(38, String.valueOf(order.getQuantity())); // OrderQty
-        execReport.setField(44, String.format("%.2f", order.getPrice())); // Price
-        
-        if (order.getFilledQty() > 0) {
-            execReport.setField(32, String.valueOf(order.getFilledQty())); // LastQty
-            execReport.setField(31, String.format("%.2f", order.getPrice())); // LastPx
-        }
-        
-        execReport.setField(60, getCurrentUTCTimestamp()); // TransactTime
-        
-        sendMessage(execReport);
-    }
-    
-    private void sendHeartbeat(String testReqID) {
-        FIXMessage heartbeat = new FIXMessage("0");
-        if (testReqID != null) {
-            heartbeat.setField(112, testReqID);
-        }
-        sendMessage(heartbeat);
-    }
-    
-    private void handleLogout() {
-        FIXMessage logout = new FIXMessage("5");
-        sendMessage(logout);
-        loggedOn = false;
-        System.out.println("✓ Client logged out");
-    }
-    
-    private void sendMessage(FIXMessage message) {
-        message.setField(49, senderCompID);
-        message.setField(56, targetCompID);
-        String rawMessage = message.build(outgoingSeqNum++);
-        out.print(rawMessage);
-        out.flush();
-        System.out.println("<< Server sent: " + formatMessage(rawMessage));
-    }
-    
-    private String formatMessage(String msg) {
-        return msg.replace('\u0001', '|');
-    }
-    
-    private String getExecType(OrderStatus status) {
-        switch (status) {
-            case NEW: return "0";
-            case FILLED: return "2";
-            case CANCELED: return "4";
-            default: return "0";
-        }
-    }
-    
-    private String getOrdStatus(OrderStatus status) {
-        switch (status) {
-            case NEW: return "0";
-            case FILLED: return "2";
-            case CANCELED: return "4";
-            default: return "0";
-        }
-    }
-    
-    private String getCurrentUTCTimestamp() {
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMdd-HH:mm:ss.SSS");
-        sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
-        return sdf.format(new Date());
-    }
-    
-    private void cleanup() {
-        heartbeatExecutor.shutdown();
-        try {
-            socket.close();
-        } catch (IOException e) {
+            System.out.println(">> Client sending: " + message.getHeader().getString(MsgType.FIELD));
+        } catch (FieldNotFound e) {
             e.printStackTrace();
         }
     }
-}
-
-// ============================================================================
-// FIX CLIENT (INITIATOR) - Connects to server and sends orders
-// ============================================================================
-class FIXClient {
-    private final FIXConfig config;
-    private Socket socket;
-    private PrintWriter out;
-    private BufferedReader in;
-    private int outgoingSeqNum = 1;
-    private int incomingSeqNum = 1;
-    private boolean connected = false;
-    private boolean loggedOn = false;
-    private ScheduledExecutorService heartbeatExecutor;
-    private ExecutorService messageProcessor;
-    private Map<String, Order> clientOrders;
     
-    public FIXClient(FIXConfig config) {
-        this.config = config;
-        this.heartbeatExecutor = Executors.newScheduledThreadPool(1);
-        this.messageProcessor = Executors.newSingleThreadExecutor();
-        this.clientOrders = new ConcurrentHashMap<>();
+    @Override
+    public void fromApp(Message message, SessionID sessionId) 
+            throws FieldNotFound, IncorrectDataFormat, IncorrectTagValue, UnsupportedMessageType {
+        crack(message, sessionId);
     }
     
-    public void start() {
-        try {
-            connect();
-            sendLogon();
-            startMessageListener();
-            startHeartbeat();
-        } catch (IOException e) {
-            System.err.println("Failed to start client: " + e.getMessage());
-        }
-    }
-    
-    private void connect() throws IOException {
-        System.out.println("Connecting to " + config.getHost() + ":" + config.getPort() + "...");
-        socket = new Socket(config.getHost(), config.getPort());
-        out = new PrintWriter(socket.getOutputStream(), true);
-        in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-        connected = true;
-        System.out.println("✓ Connected to server\n");
-    }
-    
-    private void sendLogon() {
-        System.out.println("Sending Logon...");
-        FIXMessage logon = new FIXMessage("A");
-        logon.setField(98, "0");
-        logon.setField(108, "30");
-        sendMessage(logon);
-    }
-    
-    private void startMessageListener() {
-        messageProcessor.submit(() -> {
-            try {
-                String message;
-                while (connected && (message = readFIXMessage()) != null) {
-                    processIncomingMessage(message);
-                }
-            } catch (IOException e) {
-                if (connected) {
-                    System.err.println("Connection lost: " + e.getMessage());
-                    connected = false;
-                }
-            }
-        });
-    }
-    
-    private String readFIXMessage() throws IOException {
-        StringBuilder message = new StringBuilder();
-        int c;
+    // Handle Execution Report
+    public void onMessage(ExecutionReport execReport, SessionID sessionId) 
+            throws FieldNotFound {
         
-        while ((c = in.read()) != -1) {
-            message.append((char) c);
-            if (message.toString().contains("10=") && message.toString().endsWith("\u0001")) {
-                return message.toString();
-            }
+        String clOrdID = execReport.getClOrdID().getValue();
+        char execType = execReport.getExecType().getValue();
+        char ordStatus = execReport.getOrdStatus().getValue();
+        
+        System.out.println("\n📊 EXECUTION REPORT:");
+        System.out.println("   ClOrdID: " + clOrdID);
+        System.out.println("   Exec Type: " + getExecTypeDesc(execType));
+        System.out.println("   Order Status: " + getOrdStatusDesc(ordStatus));
+        
+        if (execReport.isSetOrderID()) {
+            System.out.println("   Order ID: " + execReport.getOrderID().getValue());
         }
         
-        return null;
-    }
-    
-    private void processIncomingMessage(String rawMessage) {
-        System.out.println("<< Received: " + formatMessage(rawMessage));
-        
-        FIXMessage message = FIXMessage.parse(rawMessage);
-        String msgType = message.getField(35);
-        
-        if (msgType == null) return;
-        
-        switch (msgType) {
-            case "A": // Logon
-                loggedOn = true;
-                System.out.println("✓ Logged on to server\n");
-                break;
-            case "0": // Heartbeat
-                System.out.println("♥ Heartbeat from server");
-                break;
-            case "8": // Execution Report
-                handleExecutionReport(message);
-                break;
-            case "5": // Logout
-                loggedOn = false;
-                System.out.println("Server logged out");
-                break;
+        if (execReport.isSetLastQty() && execReport.getLastQty().getValue() > 0) {
+            System.out.println("   Filled Qty: " + (int)execReport.getLastQty().getValue());
+            System.out.println("   Fill Price: $" + execReport.getLastPx().getValue());
         }
         
-        incomingSeqNum++;
-    }
-    
-    private void handleExecutionReport(FIXMessage message) {
-        String clOrdId = message.getField(11);
-        String ordStatus = message.getField(39);
-        String execType = message.getField(150);
+        if (execReport.isSetCumQty()) {
+            System.out.println("   Cumulative Qty: " + (int)execReport.getCumQty().getValue());
+        }
         
-        Order order = clientOrders.get(clOrdId);
+        // Update order tracking
+        ClientOrder order = orders.get(clOrdID);
         if (order != null) {
-            order.setStatus(getOrderStatus(ordStatus));
-            
-            String lastQty = message.getField(32);
-            if (lastQty != null) {
-                order.setFilledQty(Integer.parseInt(lastQty));
+            order.setStatus(getOrdStatusDesc(ordStatus));
+            if (execReport.isSetCumQty()) {
+                order.setFilledQty((int)execReport.getCumQty().getValue());
             }
             
-            System.out.println("\n📊 EXECUTION REPORT:");
-            System.out.println("   Order: " + clOrdId);
-            System.out.println("   Status: " + order.getStatus());
-            System.out.println("   Exec Type: " + getExecTypeDesc(execType));
-            if (order.getFilledQty() > 0) {
-                System.out.println("   Filled: " + order.getFilledQty() + " shares");
-            }
-            System.out.println();
+            String historyEntry = String.format("[%s] %s - %s: %s", 
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss")),
+                clOrdID, order.getSymbol(), getOrdStatusDesc(ordStatus));
+            orderHistory.add(historyEntry);
         }
     }
     
-    private void startHeartbeat() {
-        heartbeatExecutor.scheduleAtFixedRate(() -> {
-            if (loggedOn) {
-                FIXMessage heartbeat = new FIXMessage("0");
-                sendMessage(heartbeat);
-            }
-        }, 30, 30, TimeUnit.SECONDS);
-    }
-    
-    public void sendNewOrderSingle(String clOrdID, String symbol, String side, int quantity, double price) {
-        if (!loggedOn) {
-            System.err.println("Cannot send order: Not logged on");
-            return;
+    // Handle Order Cancel Reject
+    public void onMessage(OrderCancelReject reject, SessionID sessionId) 
+            throws FieldNotFound {
+        
+        System.out.println("\n❌ CANCEL REJECTED:");
+        System.out.println("   ClOrdID: " + reject.getClOrdID().getValue());
+        if (reject.isSetText()) {
+            System.out.println("   Reason: " + reject.getText().getValue());
         }
-        
-        FIXMessage order = new FIXMessage("D");
-        order.setField(11, clOrdID);
-        order.setField(55, symbol);
-        order.setField(54, side.equals("BUY") ? "1" : "2");
-        order.setField(38, String.valueOf(quantity));
-        order.setField(40, "2"); // Limit order
-        order.setField(44, String.format("%.2f", price));
-        order.setField(59, "0"); // Day order
-        order.setField(60, getCurrentUTCTimestamp());
-        
-        Order clientOrder = new Order("", clOrdID, symbol, side, quantity, price);
-        clientOrders.put(clOrdID, clientOrder);
-        
-        sendMessage(order);
-        System.out.println("✓ Order sent: " + clOrdID);
     }
     
-    public void sendOrderCancelRequest(String clOrdID) {
-        Order order = clientOrders.get(clOrdID);
-        if (order == null) {
-            System.err.println("Order not found: " + clOrdID);
-            return;
-        }
-        
-        FIXMessage cancel = new FIXMessage("F");
-        cancel.setField(41, clOrdID); // OrigClOrdID
-        cancel.setField(11, "CXL" + System.currentTimeMillis()); // New ClOrdID
-        cancel.setField(55, order.getSymbol());
-        cancel.setField(54, order.getSide().equals("BUY") ? "1" : "2");
-        cancel.setField(60, getCurrentUTCTimestamp());
-        
-        sendMessage(cancel);
-        System.out.println("✓ Cancel request sent for: " + clOrdID);
-    }
-    
-    public void displayOrders() {
-        System.out.println("\n=== Client Orders ===");
-        if (clientOrders.isEmpty()) {
-            System.out.println("No orders yet.");
-        } else {
-            for (Order order : clientOrders.values()) {
-                System.out.println(order);
-            }
-        }
-        System.out.println();
-    }
-    
-    private void sendMessage(FIXMessage message) {
-        message.setField(49, config.getSenderCompID());
-        message.setField(56, config.getTargetCompID());
-        String rawMessage = message.build(outgoingSeqNum++);
-        out.print(rawMessage);
-        out.flush();
-        System.out.println(">> Sent: " + formatMessage(rawMessage));
-    }
-    
-    public boolean isConnected() {
-        return connected && loggedOn;
-    }
-    
-    public void stop() {
-        if (loggedOn) {
-            FIXMessage logout = new FIXMessage("5");
-            sendMessage(logout);
-        }
-        
-        heartbeatExecutor.shutdown();
-        messageProcessor.shutdown();
-        
+    public void waitForLogon() {
         try {
-            if (socket != null) {
-                socket.close();
-            }
-        } catch (IOException e) {
+            logonLatch.await();
+        } catch (InterruptedException e) {
             e.printStackTrace();
         }
-        
-        connected = false;
-        loggedOn = false;
-        System.out.println("✓ Disconnected from server");
     }
     
-    private String formatMessage(String msg) {
-        return msg.replace('\u0001', '|');
-    }
-    
-    private String getCurrentUTCTimestamp() {
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMdd-HH:mm:ss.SSS");
-        sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
-        return sdf.format(new Date());
-    }
-    
-    private OrderStatus getOrderStatus(String status) {
-        switch (status) {
-            case "0": return OrderStatus.NEW;
-            case "1": return OrderStatus.PARTIALLY_FILLED;
-            case "2": return OrderStatus.FILLED;
-            case "4": return OrderStatus.CANCELED;
-            case "8": return OrderStatus.REJECTED;
-            default: return OrderStatus.PENDING;
+    public void sendNewOrderSingle(String symbol, char side, int quantity, 
+            char ordType, double price, char timeInForce) {
+        try {
+            String clOrdID = "CLI" + System.currentTimeMillis();
+            
+            NewOrderSingle order = new NewOrderSingle(
+                new ClOrdID(clOrdID),
+                new Side(side),
+                new TransactTime(new Date()),
+                new OrdType(ordType)
+            );
+            
+            order.set(new Symbol(symbol));
+            order.set(new OrderQty(quantity));
+            order.set(new TimeInForce(timeInForce));
+            
+            if (ordType == OrdType.LIMIT) {
+                order.set(new Price(price));
+            }
+            
+            Session.sendToTarget(order, sessionId);
+            
+            // Track order
+            ClientOrder clientOrder = new ClientOrder(clOrdID, symbol, 
+                side == Side.BUY ? "BUY" : "SELL", quantity, price);
+            orders.put(clOrdID, clientOrder);
+            
+            System.out.println("\n✓ Order sent: " + clOrdID);
+        } catch (Exception e) {
+            System.err.println("Error sending order: " + e.getMessage());
         }
     }
     
-    private String getExecTypeDesc(String execType) {
+    public void sendOrderCancelRequest(String origClOrdID) {
+        try {
+            String clOrdID = "CXL" + System.currentTimeMillis();
+            
+            OrderCancelRequest cancel = new OrderCancelRequest(
+                new OrigClOrdID(origClOrdID),
+                new ClOrdID(clOrdID),
+                new Side(Side.BUY),
+                new TransactTime(new Date())
+            );
+            
+            ClientOrder order = orders.get(origClOrdID);
+            if (order != null) {
+                cancel.set(new Symbol(order.getSymbol()));
+                cancel.set(new OrderQty(order.getQuantity()));
+            }
+            
+            Session.sendToTarget(cancel, sessionId);
+            System.out.println("\n✓ Cancel request sent");
+        } catch (Exception e) {
+            System.err.println("Error sending cancel: " + e.getMessage());
+        }
+    }
+    
+    public void sendOrderCancelReplaceRequest(String origClOrdID, int newQty, double newPrice) {
+        try {
+            String clOrdID = "REP" + System.currentTimeMillis();
+            
+            ClientOrder order = orders.get(origClOrdID);
+            if (order == null) {
+                System.err.println("Order not found: " + origClOrdID);
+                return;
+            }
+            
+            OrderCancelReplaceRequest replace = new OrderCancelReplaceRequest(
+                new OrigClOrdID(origClOrdID),
+                new ClOrdID(clOrdID),
+                new Side(order.getSide().equals("BUY") ? Side.BUY : Side.SELL),
+                new TransactTime(new Date()),
+                new OrdType(OrdType.LIMIT)
+            );
+            
+            replace.set(new Symbol(order.getSymbol()));
+            replace.set(new OrderQty(newQty));
+            replace.set(new Price(newPrice));
+            
+            Session.sendToTarget(replace, sessionId);
+            System.out.println("\n✓ Replace request sent");
+        } catch (Exception e) {
+            System.err.println("Error sending replace: " + e.getMessage());
+        }
+    }
+    
+    public void sendOrderStatusRequest(String clOrdID) {
+        try {
+            ClientOrder order = orders.get(clOrdID);
+            if (order == null) {
+                System.err.println("Order not found: " + clOrdID);
+                return;
+            }
+            
+            OrderStatusRequest statusRequest = new OrderStatusRequest(
+                new ClOrdID(clOrdID),
+                new Side(order.getSide().equals("BUY") ? Side.BUY : Side.SELL)
+            );
+            
+            statusRequest.set(new Symbol(order.getSymbol()));
+            
+            Session.sendToTarget(statusRequest, sessionId);
+            System.out.println("\n✓ Status request sent");
+        } catch (Exception e) {
+            System.err.println("Error sending status request: " + e.getMessage());
+        }
+    }
+    
+    public void displayActiveOrders() {
+        System.out.println("\n╔════════════════════════════════════════════════════════════════════╗");
+        System.out.println("║                        ACTIVE ORDERS                               ║");
+        System.out.println("╠════════════════════════════════════════════════════════════════════╣");
+        
+        boolean hasActive = false;
+        for (ClientOrder order : orders.values()) {
+            if (!order.getStatus().equals("FILLED") && !order.getStatus().equals("CANCELED")) {
+                hasActive = true;
+                System.out.printf("║ %-15s | %-6s | %-4s | %5d @ $%-8.2f | %-12s ║%n",
+                    order.getClOrdID(), order.getSymbol(), order.getSide(),
+                    order.getQuantity(), order.getPrice(), order.getStatus());
+            }
+        }
+        
+        if (!hasActive) {
+            System.out.println("║                       No active orders                             ║");
+        }
+        
+        System.out.println("╚════════════════════════════════════════════════════════════════════╝");
+    }
+    
+    public void displayOrderHistory() {
+        System.out.println("\n╔════════════════════════════════════════════════════════════════════╗");
+        System.out.println("║                        ORDER HISTORY                               ║");
+        System.out.println("╠════════════════════════════════════════════════════════════════════╣");
+        
+        if (orderHistory.isEmpty()) {
+            System.out.println("║                       No order history                             ║");
+        } else {
+            for (String entry : orderHistory) {
+                System.out.printf("║ %-66s ║%n", entry);
+            }
+        }
+        
+        System.out.println("╚════════════════════════════════════════════════════════════════════╝");
+    }
+    
+    private String getExecTypeDesc(char execType) {
         switch (execType) {
-            case "0": return "New";
-            case "1": return "Partial Fill";
-            case "2": return "Fill";
-            case "4": return "Canceled";
-            case "8": return "Rejected";
+            case ExecType.NEW: return "New";
+            case ExecType.PARTIAL_FILL: return "Partial Fill";
+            case ExecType.FILL: return "Fill";
+            case ExecType.CANCELED: return "Canceled";
+            case ExecType.REPLACED: return "Replaced";
+            case ExecType.REJECTED: return "Rejected";
+            case ExecType.ORDER_STATUS: return "Order Status";
             default: return "Unknown";
+        }
+    }
+    
+    private String getOrdStatusDesc(char ordStatus) {
+        switch (ordStatus) {
+            case OrdStatus.NEW: return "NEW";
+            case OrdStatus.PARTIALLY_FILLED: return "PARTIAL";
+            case OrdStatus.FILLED: return "FILLED";
+            case OrdStatus.CANCELED: return "CANCELED";
+            case OrdStatus.REJECTED: return "REJECTED";
+            case OrdStatus.PENDING_CANCEL: return "PENDING_CANCEL";
+            case OrdStatus.PENDING_REPLACE: return "PENDING_REPLACE";
+            default: return "UNKNOWN";
         }
     }
 }
@@ -712,151 +864,71 @@ class FIXClient {
 // SUPPORTING CLASSES
 // ============================================================================
 
-class FIXConfig {
-    private final String senderCompID;
-    private final String targetCompID;
-    private final String host;
-    private final int port;
-    private final String fixVersion;
-    
-    public FIXConfig(String senderCompID, String targetCompID, String host, int port, String fixVersion) {
-        this.senderCompID = senderCompID;
-        this.targetCompID = targetCompID;
-        this.host = host;
-        this.port = port;
-        this.fixVersion = fixVersion;
-    }
-    
-    public String getSenderCompID() { return senderCompID; }
-    public String getTargetCompID() { return targetCompID; }
-    public String getHost() { return host; }
-    public int getPort() { return port; }
-    public String getFixVersion() { return fixVersion; }
-}
-
-class FIXMessage {
-    private final Map<Integer, String> fields = new LinkedHashMap<>();
-    private static final char SOH = '\u0001';
-    
-    public FIXMessage(String msgType) {
-        fields.put(35, msgType);
-    }
-    
-    public void setField(int tag, String value) {
-        fields.put(tag, value);
-    }
-    
-    public String getField(int tag) {
-        return fields.get(tag);
-    }
-    
-    public String build(int msgSeqNum) {
-        StringBuilder body = new StringBuilder();
-        
-        // Add sequence number and sending time
-        fields.put(34, String.valueOf(msgSeqNum));
-        fields.put(52, getCurrentUTCTimestamp());
-        
-        // Build body
-        for (Map.Entry<Integer, String> entry : fields.entrySet()) {
-            if (entry.getKey() != 8 && entry.getKey() != 9 && entry.getKey() != 10) {
-                body.append(entry.getKey()).append("=").append(entry.getValue()).append(SOH);
-            }
-        }
-        
-        StringBuilder message = new StringBuilder();
-        String beginString = fields.getOrDefault(8, "FIX.4.4");
-        
-        message.append("8=").append(beginString).append(SOH);
-        message.append("9=").append(body.length()).append(SOH);
-        message.append(body);
-        message.append("10=").append(calculateChecksum(message.toString())).append(SOH);
-        
-        return message.toString();
-    }
-    
-    public static FIXMessage parse(String rawMessage) {
-        String[] parts = rawMessage.split(String.valueOf(SOH));
-        String msgType = "";
-        
-        for (String part : parts) {
-            if (part.startsWith("35=")) {
-                msgType = part.substring(3);
-                break;
-            }
-        }
-        
-        FIXMessage message = new FIXMessage(msgType);
-        
-        for (String part : parts) {
-            if (part.contains("=")) {
-                String[] kv = part.split("=", 2);
-                try {
-                    message.setField(Integer.parseInt(kv[0]), kv[1]);
-                } catch (NumberFormatException e) {
-                    // Skip invalid fields
-                }
-            }
-        }
-        
-        return message;
-    }
-    
-    private String calculateChecksum(String message) {
-        int sum = 0;
-        for (char c : message.toCharArray()) {
-            sum += c;
-        }
-        return String.format("%03d", sum % 256);
-    }
-    
-    private String getCurrentUTCTimestamp() {
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMdd-HH:mm:ss.SSS");
-        sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
-        return sdf.format(new Date());
-    }
-}
-
-class Order {
-    private final String orderId;
-    private final String clOrdId;
+class OrderData {
+    private final String orderID;
+    private String clOrdID;
     private final String symbol;
-    private final String side;
-    private final int quantity;
-    private final double price;
-    private OrderStatus status;
+    private final char side;
+    private int quantity;
+    private double price;
     private int filledQty;
+    private boolean canceled;
     
-    public Order(String orderId, String clOrdId, String symbol, String side, int quantity, double price) {
-        this.orderId = orderId;
-        this.clOrdId = clOrdId;
+    public OrderData(String orderID, String clOrdID, String symbol, char side, int quantity, double price) {
+        this.orderID = orderID;
+        this.clOrdID = clOrdID;
         this.symbol = symbol;
         this.side = side;
         this.quantity = quantity;
         this.price = price;
-        this.status = OrderStatus.PENDING;
+        this.filledQty = 0;
+        this.canceled = false;
+    }
+    
+    public String getOrderID() { return orderID; }
+    public String getClOrdID() { return clOrdID; }
+    public String getSymbol() { return symbol; }
+    public char getSide() { return side; }
+    public int getQuantity() { return quantity; }
+    public double getPrice() { return price; }
+    public int getFilledQty() { return filledQty; }
+    public boolean isCanceled() { return canceled; }
+    public boolean isFilled() { return filledQty >= quantity; }
+    
+    public void setClOrdID(String clOrdID) { this.clOrdID = clOrdID; }
+    public void setQuantity(int quantity) { this.quantity = quantity; }
+    public void setPrice(double price) { this.price = price; }
+    public void setFilledQty(int filledQty) { this.filledQty = filledQty; }
+    public void setCanceled(boolean canceled) { this.canceled = canceled; }
+}
+
+class ClientOrder {
+    private final String clOrdID;
+    private final String symbol;
+    private final String side;
+    private final int quantity;
+    private final double price;
+    private String status;
+    private int filledQty;
+    
+    public ClientOrder(String clOrdID, String symbol, String side, int quantity, double price) {
+        this.clOrdID = clOrdID;
+        this.symbol = symbol;
+        this.side = side;
+        this.quantity = quantity;
+        this.price = price;
+        this.status = "PENDING";
         this.filledQty = 0;
     }
     
-    public String getOrderId() { return orderId; }
-    public String getClOrdId() { return clOrdId; }
+    public String getClOrdID() { return clOrdID; }
     public String getSymbol() { return symbol; }
     public String getSide() { return side; }
     public int getQuantity() { return quantity; }
     public double getPrice() { return price; }
-    public OrderStatus getStatus() { return status; }
+    public String getStatus() { return status; }
     public int getFilledQty() { return filledQty; }
     
-    public void setStatus(OrderStatus status) { this.status = status; }
-    public void setFilledQty(int qty) { this.filledQty = qty; }
-    
-    @Override
-    public String toString() {
-        return String.format("%s: %s %d %s @ %.2f [%s] Filled: %d", 
-            clOrdId, side, quantity, symbol, price, status, filledQty);
-    }
-}
-
-enum OrderStatus {
-    PENDING, NEW, PARTIALLY_FILLED, FILLED, CANCELED, REJECTED
+    public void setStatus(String status) { this.status = status; }
+    public void setFilledQty(int filledQty) { this.filledQty = filledQty; }
 }
