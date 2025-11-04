@@ -977,7 +977,6 @@ SOFTWARE.
 - **Documentation**: Read this README and inline code documentation
 - **Issues**: Report bugs via GitHub Issues
 - **Discussions**: Ask questions in GitHub Discussions
-- **Email**: support@fixprotocolapp.com
 
 ### Resources
 
